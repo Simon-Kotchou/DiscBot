@@ -54,7 +54,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.song_queue = Queue(maxsize=50)
+        self.song_queue = asyncio.Queue(maxsize=50)
         self.current_song = ""
         self.create_table()
 
@@ -70,6 +70,14 @@ class Music(commands.Cog):
             await ctx.voice_client.move_to(voice_channel)
             vc = ctx.voice_client
 
+    # @commands.command(description="streams music")
+    # async def play(self, ctx, *, url):
+    #     async with ctx.typing():
+    #         player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
+    #         ctx.voice_client.play(player, after=lambda e: self.play_next(ctx) if e is None else print('Player error: %s' % e))
+    #         self.current_song = player.title
+    #         await self.add_to_db(player.title, url, ctx.author.name)
+    #     await ctx.send('Now playing: {}'.format(player.title))
     @commands.command(description="streams music")
     async def play(self, ctx, *, url):
         async with ctx.typing():
@@ -77,15 +85,22 @@ class Music(commands.Cog):
             ctx.voice_client.play(player, after=lambda e: self.play_next(ctx) if e is None else print('Player error: %s' % e))
             self.current_song = player.title
             await self.add_to_db(player.title, url, ctx.author.name)
-        await ctx.send('Now playing: {}'.format(player.title))
+            thumbnail_url = player.data.get('thumbnail')
+            if thumbnail_url:
+                await ctx.send(f"Now playing: {player.title} with album art {thumbnail_url}")
+            else:
+                await ctx.send(f'Now playing: {player.title}')
 
     def play_next(self, ctx):
-        if not self.song_queue.empty():
-            next_player = self.song_queue.get_nowait()
-            ctx.voice_client.play(next_player, after=lambda e: self.play_next(ctx) if e is None else print('Player error: %s' % e))
-            ctx.send(f'Now playing: {next_player.title}')
-        else:
-            ctx.voice_client.stop()
+        async def play_next_async():
+            if not self.song_queue.empty():
+                next_player = await self.song_queue.get()
+                ctx.voice_client.play(next_player, after=lambda e: play_next_async() if e is None else print('Player error: %s' % e))
+                self.current_song = next_player.title
+                await ctx.send(f'Now playing: {next_player.title}')
+            else:
+                ctx.voice_client.stop()
+        self.bot.loop.create_task(play_next_async())
 
     @commands.command(description="queue music links")
     async def queue(self, ctx, *, url):
@@ -97,9 +112,12 @@ class Music(commands.Cog):
     @commands.command(description="skip the current song")
     async def skip(self, ctx):
         ctx.voice_client.stop()
-        await ctx.send(f'Skipping current song {self.current_song}')
-        self.current_song = self.song_queue.get_nowait().title
-        self.play_next(ctx)
+        if not self.song_queue.empty():
+            self.current_song = self.song_queue.get_nowait().title
+            await ctx.send(f'Skipping current song {self.current_song}')
+            self.play_next(ctx)
+        else:
+            await ctx.send("No more songs in the queue")
 
     @commands.command(description="pauses the current song")
     async def pause(self, ctx):
@@ -113,7 +131,7 @@ class Music(commands.Cog):
     async def resume(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
-            await ctx.send('Resumed the currentsong')
+            await ctx.send('Resumed the current song')
         else:
             await ctx.send('Nothing is currently paused')
 
@@ -156,7 +174,7 @@ class Music(commands.Cog):
     async def add_to_db(self, title, url, user):
         conn = sqlite3.connect("music.db")
         c = conn.cursor()
-        c.execute("INSERT INTO music (title, url) VALUES (?,?, ?)", (title, url, user))
+        c.execute("INSERT INTO music (title, url, user) VALUES (?,?,?)", (title, url, user))
         conn.commit()
         conn.close()
 
