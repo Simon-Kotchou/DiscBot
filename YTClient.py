@@ -20,7 +20,15 @@ ytdl_config = {
     'quiet': False,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0'
+    'source_address': '0.0.0.0',
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    },{
+    'key': 'FFmpegMetadata',
+    'add_metadata': True,
+    }]
 }
 
 ffmpeg_config = {
