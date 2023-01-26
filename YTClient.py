@@ -2,8 +2,11 @@ import discord
 import youtube_dl
 import asyncio
 from discord.ext import commands 
-from queue import Queue
 import sqlite3
+import json
+import urllib
+import requests
+import base64
 
 #https://stackoverflow.com/questions/66115216/discord-py-play-audio-from-url
 
@@ -21,18 +24,18 @@ ytdl_config = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'postprocessors': [{
-        'key': 'FFmpegExtractAudio',
-        'preferredcodec': 'mp3',
-        'preferredquality': '192',
-    },{
-    'key': 'FFmpegMetadata',
-    'add_metadata': True,
-    }]
+    # 'postprocessors': [{
+    #     'key': 'FFmpegExtractAudio',
+    #     'preferredcodec': 'mp3',
+    #     'preferredquality': '192',
+    # },{
+    # 'key': 'FFmpegMetadata',
+    # 'add_metadata': True,
+    # }]
 }
 
 ffmpeg_config = {
-    'options': '-vn'
+    'options': '-vn -b:a 320k'
 }
 
 yt_client = youtube_dl.YoutubeDL(ytdl_config)
@@ -45,6 +48,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
         self.title = data.get('title')
         self.url = data.get('url')
+        # self.song_title = data.get("song_title")
+        # self.artist_name = data.get("artist_name")
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=False):
@@ -78,52 +83,151 @@ class Music(commands.Cog):
             await ctx.voice_client.move_to(voice_channel)
             vc = ctx.voice_client
 
-    # @commands.command(description="streams music")
-    # async def play(self, ctx, *, url):
-    #     async with ctx.typing():
-    #         player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-    #         ctx.voice_client.play(player, after=lambda e: self.play_next(ctx) if e is None else print('Player error: %s' % e))
-    #         self.current_song = player.title
-    #         await self.add_to_db(player.title, url, ctx.author.name)
-    #     await ctx.send('Now playing: {}'.format(player.title))
     @commands.command(description="streams music")
-    async def play(self, ctx, *, url):
+    async def play(self, ctx, *, url, player=None):
         async with ctx.typing():
-            player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-            ctx.voice_client.play(player, after=lambda e: self.play_next(ctx) if e is None else print('Player error: %s' % e))
+            if player == None:
+                player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
+            if ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+            ctx.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(ctx)) if e is None else print('Player error: %s' % e))
             self.current_song = player.title
             await self.add_to_db(player.title, url, ctx.author.name)
-            thumbnail_url = player.data.get('thumbnail')
-            if thumbnail_url:
-                await ctx.send(f"Now playing: {player.title} with album art {thumbnail_url}")
-            else:
-                await ctx.send(f'Now playing: {player.title}')
+            art_url = await self.get_album_art_spotify(player.title)
+            embed = discord.Embed(title=f"Now playing: {player.title}")
+            if art_url:
+                embed.set_image(url=art_url)
+            await ctx.send(embed=embed)
 
-    def play_next(self, ctx):
-        async def play_next_async():
-            if not self.song_queue.empty():
-                next_player = await self.song_queue.get()
-                ctx.voice_client.play(next_player, after=lambda e: play_next_async() if e is None else print('Player error: %s' % e))
-                self.current_song = next_player.title
-                await ctx.send(f'Now playing: {next_player.title}')
-            else:
-                ctx.voice_client.stop()
-        self.bot.loop.create_task(play_next_async())
+    async def play_next(self, ctx):
+        if not self.song_queue.empty():
+            next_song, next_url = await self.song_queue.get()
+            async with ctx.typing():
+                player = await YTDLSource.from_url(next_url, loop=self.bot.loop, stream=True)
+                ctx.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(ctx)) if e is None else print('Player error: %s' % e))
+                self.current_song = player.title
+                await self.add_to_db(player.title, next_url, ctx.author.name)
+                art_url = await self.get_album_art_spotify(player.title)
+                embed = discord.Embed(title=f"Now playing: {player.title}")
+                if art_url:
+                    embed.set_image(url=art_url)
+                await ctx.send(embed=embed)
+        else:
+            ctx.voice_client.stop()
+
+    def get_client_credentials_token(self):
+        client_id = os.getenv('CLIENT_ID')
+        client_secret = os.getenv("CLIENT_SECRET")
+
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {base64.b64encode(f'{client_id}:{client_secret}'.encode()).decode()}"
+        }
+
+        data = {
+            "grant_type": "client_credentials"
+        }
+
+        url = "https://accounts.spotify.com/api/token"
+        response = requests.post(url, headers=headers, data=data)
+        return response.json()["access_token"]
+
+    async def get_album_art_spotify(self, song_title):
+        if not song_title:
+            return None
+        token = self.get_client_credentials_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        query = f"{song_title}"
+        query = urllib.parse.quote(query)
+        url = f"https://api.spotify.com/v1/search?q={query}&type=track"
+        response = requests.get(url, headers=headers)
+        data = json.loads(response.text)
+        try:
+            art_url = data.get("tracks", {}).get("items", [{}])[0].get("album", {}).get("images", [{}])[0].get("url")
+        except FileNotFoundError:
+            art_url = None
+        return art_url
+
+    @commands.command(description="generates spotify recommendations")
+    async def recommend(self, ctx):
+        async with ctx.typing():
+            recommendations = await self.generate_recommendations()
+            if not recommendations:
+                return await ctx.send("No recommendations could be generated.")
+            message = "Here are your recommendations:\n"
+            for i, track in enumerate(recommendations):
+                message += f"{i+1}. {track['name']} by {track['artists'][0]['name']}\n"
+            await ctx.send(message)
+
+    async def generate_recommendations(self):
+        # Get the access token
+        token = self.get_client_credentials_token()
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        # Get the past 10 songs played from the database
+        past_songs = await self.get_past_songs(10)
+        if not past_songs:
+            return None
+
+        # Get the Spotify IDs of the past songs
+        track_ids = []
+        for song in past_songs:
+            track_id = await self.get_track_id(song[0], token=token)
+            if track_id:
+                track_ids.append(track_id)
+
+        if not track_ids:
+            return None
+
+        # Get the recommendations from Spotify
+        url = f"https://api.spotify.com/v1/recommendations?seed_tracks={','.join(track_ids)}"
+        response = requests.get(url, headers=headers)
+        data = json.loads(response.text)
+        recommendations = data.get("tracks", [])
+
+        return recommendations
+
+    async def get_track_id(self, title, token=None):
+        # Search for the song on Spotify and return its ID
+        if token == None:
+            token = self.get_client_credentials_token()
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        query = f"{title}"
+        query = urllib.parse.quote(query)
+        url = f"https://api.spotify.com/v1/search?q={query}&type=track"
+        response = requests.get(url, headers=headers)
+        data = json.loads(response.text)
+        try:
+            track_id = data.get("tracks", {}).get("items", [{}])[0].get("id")
+        except FileNotFoundError:
+            track_id = None
+        return track_id
 
     @commands.command(description="queue music links")
     async def queue(self, ctx, *, url):
         async with ctx.typing():
             player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-            self.song_queue.put_nowait(player)
+            await self.song_queue.put((player, url))
             await ctx.send(f'{player.title} has been added to the queue.')
 
     @commands.command(description="skip the current song")
     async def skip(self, ctx):
         ctx.voice_client.stop()
         if not self.song_queue.empty():
-            self.current_song = self.song_queue.get_nowait().title
             await ctx.send(f'Skipping current song {self.current_song}')
-            self.play_next(ctx)
+            self.bot.create_task(self.play_next(ctx))
         else:
             await ctx.send("No more songs in the queue")
 
@@ -185,6 +289,14 @@ class Music(commands.Cog):
         c.execute("INSERT INTO music (title, url, user) VALUES (?,?,?)", (title, url, user))
         conn.commit()
         conn.close()
+
+    async def get_past_songs(self, limit):
+        conn = sqlite3.connect('music.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, url FROM music ORDER BY id DESC LIMIT ?", (limit,))
+        past_songs = cursor.fetchall()
+        conn.close()
+        return past_songs
 
 async def setup_yt_client(bot):
    await bot.add_cog(Music(bot))
