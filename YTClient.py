@@ -7,6 +7,8 @@ import json
 import urllib
 import requests
 import base64
+import functools
+import os
 
 #https://stackoverflow.com/questions/66115216/discord-py-play-audio-from-url
 
@@ -24,18 +26,10 @@ ytdl_config = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    # 'postprocessors': [{
-    #     'key': 'FFmpegExtractAudio',
-    #     'preferredcodec': 'mp3',
-    #     'preferredquality': '192',
-    # },{
-    # 'key': 'FFmpegMetadata',
-    # 'add_metadata': True,
-    # }]
 }
 
 ffmpeg_config = {
-    'options': '-vn -b:a 320k'
+    'options': '-vn -b:a 320k -bufsize 512k -probesize 50M -analyzeduration 100M'
 }
 
 yt_client = youtube_dl.YoutubeDL(ytdl_config)
@@ -83,28 +77,46 @@ class Music(commands.Cog):
             await ctx.voice_client.move_to(voice_channel)
             vc = ctx.voice_client
 
+    def play_callback(self, ctx, error):
+        if error is None:
+            self.bot.loop.create_task(self.play_next(ctx))
+        else:
+            print(f'Player error: {error}')
+
     @commands.command(description="streams music")
     async def play(self, ctx, *, url, player=None):
         async with ctx.typing():
-            if player == None:
+            if ctx.voice_client.is_playing() or not self.song_queue.empty():
                 player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-            if ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
-            ctx.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(ctx)) if e is None else print('Player error: %s' % e))
-            self.current_song = player.title
-            await self.add_to_db(player.title, url, ctx.author.name)
-            art_url = await self.get_album_art_spotify(player.title)
-            embed = discord.Embed(title=f"Now playing: {player.title}")
-            if art_url:
-                embed.set_image(url=art_url)
-            await ctx.send(embed=embed)
+                await self.song_queue.put((player, url))
+                await ctx.send(f'{player.title} has been added to the queue.')
+            else:
+                if player is None:
+                    player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
+                ctx.voice_client.play(player, after=lambda e: self.play_callback(ctx, e))
+                self.current_song = player.title
+                await self.add_to_db(player.title, url, ctx.author.name)
+                art_url = await self.get_album_art_spotify(player.title)
+                embed = discord.Embed(title=f"Now playing: {player.title}")
+                if art_url:
+                    embed.set_image(url=art_url)
+                await ctx.send(embed=embed)
 
     async def play_next(self, ctx):
         if not self.song_queue.empty():
-            next_song, next_url = await self.song_queue.get()
+            player, next_url = await self.song_queue.get()
             async with ctx.typing():
-                player = await YTDLSource.from_url(next_url, loop=self.bot.loop, stream=True)
-                ctx.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(ctx)) if e is None else print('Player error: %s' % e))
+                if player is None:
+                    player = await YTDLSource.from_url(next_url, loop=self.bot.loop, stream=True)
+
+                # Cleanup the previous FFmpeg process if it exists
+                if ctx.voice_client.source:
+                    ctx.voice_client.source.cleanup()
+
+                # Add a small delay before playing the next song
+                await asyncio.sleep(1)
+
+                ctx.voice_client.play(player, after=lambda e: self.play_callback(ctx, e))
                 self.current_song = player.title
                 await self.add_to_db(player.title, next_url, ctx.author.name)
                 art_url = await self.get_album_art_spotify(player.title)
@@ -116,8 +128,8 @@ class Music(commands.Cog):
             ctx.voice_client.stop()
 
     def get_client_credentials_token(self):
-        client_id = os.getenv('CLIENT_ID')
-        client_secret = os.getenv("CLIENT_SECRET")
+        client_id = os.getenv('SPOTIFY_CLIENT_ID')
+        client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
 
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -172,7 +184,7 @@ class Music(commands.Cog):
         }
 
         # Get the past 10 songs played from the database
-        past_songs = await self.get_past_songs(10)
+        past_songs = await self.get_past_songs(5)
         if not past_songs:
             return None
 
@@ -221,13 +233,15 @@ class Music(commands.Cog):
             player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
             await self.song_queue.put((player, url))
             await ctx.send(f'{player.title} has been added to the queue.')
+            if not ctx.voice_client.is_playing():
+                self.bot.loop.create_task(self.play_next(ctx))
 
     @commands.command(description="skip the current song")
     async def skip(self, ctx):
         ctx.voice_client.stop()
         if not self.song_queue.empty():
             await ctx.send(f'Skipping current song {self.current_song}')
-            self.bot.create_task(self.play_next(ctx))
+            self.bot.loop.create_task(self.play_next(ctx))
         else:
             await ctx.send("No more songs in the queue")
 
@@ -299,4 +313,7 @@ class Music(commands.Cog):
         return past_songs
 
 async def setup_yt_client(bot):
-   await bot.add_cog(Music(bot))
+    if not bot.get_cog("Music"):
+        await bot.add_cog(Music(bot))
+    else:
+        print("Music cog has already been added.")
