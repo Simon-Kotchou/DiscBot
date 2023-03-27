@@ -29,7 +29,7 @@ ytdl_config = {
 }
 
 ffmpeg_config = {
-    'options': '-vn -b:a 320k -bufsize 512k -probesize 50M -analyzeduration 100M'
+    'options': '-vn' #-b:a 320k -bufsize 512k -probesize 50M -analyzeduration 100M'
 }
 
 yt_client = youtube_dl.YoutubeDL(ytdl_config)
