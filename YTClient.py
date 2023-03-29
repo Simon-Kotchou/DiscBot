@@ -29,7 +29,7 @@ ytdl_config = {
 }
 
 ffmpeg_config = {
-    'options': '-vn' #-b:a 320k -bufsize 512k -probesize 50M -analyzeduration 100M'
+    'options': '-vn -loglevel debug -bufsize 512k'
 }
 
 yt_client = youtube_dl.YoutubeDL(ytdl_config)
@@ -229,12 +229,16 @@ class Music(commands.Cog):
 
     @commands.command(description="queue music links")
     async def queue(self, ctx, *, url):
-        async with ctx.typing():
-            player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-            await self.song_queue.put((player, url))
-            await ctx.send(f'{player.title} has been added to the queue.')
-            if not ctx.voice_client.is_playing():
-                self.bot.loop.create_task(self.play_next(ctx))
+        async def download_song():
+            async with ctx.typing():
+                player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
+                await self.song_queue.put((player, url))
+                await ctx.send(f'{player.title} has been added to the queue.')
+
+        self.bot.loop.create_task(download_song())
+
+        if not ctx.voice_client.is_playing():
+            self.bot.loop.create_task(self.play_next(ctx))
 
     @commands.command(description="skip the current song")
     async def skip(self, ctx):
