@@ -9,6 +9,9 @@ import requests
 import base64
 import functools
 import os
+import functools
+import concurrent.futures
+
 
 #https://stackoverflow.com/questions/66115216/discord-py-play-audio-from-url
 
@@ -29,7 +32,7 @@ ytdl_config = {
 }
 
 ffmpeg_config = {
-    'options': '-vn -loglevel debug -bufsize 512k'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn -bufsize 512k'
 }
 
 yt_client = youtube_dl.YoutubeDL(ytdl_config)
@@ -79,7 +82,7 @@ class Music(commands.Cog):
 
     def play_callback(self, ctx, error):
         if error is None:
-            self.bot.loop.create_task(self.play_next(ctx))
+            asyncio.create_task(self.play_next(ctx))
         else:
             print(f'Player error: {error}')
 
@@ -111,7 +114,10 @@ class Music(commands.Cog):
 
                 # Cleanup the previous FFmpeg process if it exists
                 if ctx.voice_client.source:
-                    ctx.voice_client.source.cleanup()
+                    try:
+                        ctx.voice_client.source.cleanup()
+                    except Exception as e:
+                        print(f"Error cleaning up FFmpeg process: {e}")
 
                 # Add a small delay before playing the next song
                 await asyncio.sleep(1)
@@ -234,7 +240,7 @@ class Music(commands.Cog):
                 player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
                 await self.song_queue.put((player, url))
                 await ctx.send(f'{player.title} has been added to the queue.')
-
+        
         self.bot.loop.create_task(download_song())
 
         if not ctx.voice_client.is_playing():

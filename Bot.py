@@ -1,6 +1,7 @@
 import discord
 from YTClient import setup_yt_client
 from DiffusionClient import setup_diffusion_client
+from ChatClientMistral import setup_chat_client
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ if __name__ == "__main__":
     @bot.event
     async def on_ready():
         await setup_yt_client(bot)
-        await setup_diffusion_client(bot)
+        await setup_chat_client(bot)
+        #await setup_diffusion_client(bot)
     token = os.getenv('DISCORD_TOKEN')
     bot.run(token)
