@@ -52,6 +52,7 @@ class ChatGenerator(commands.Cog):
         with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
             response = await chain.ainvoke(inputs)
         memory.save_context(inputs, {"output": response})
+        self.conversations[user_id] = memory
 
         return response
 
