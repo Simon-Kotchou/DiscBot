@@ -5,9 +5,11 @@ from ChatClientMistral import setup_chat_client
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
+from huggingface_hub import login
 
 if __name__ == "__main__":
     load_dotenv()
+    login(token=os.getenv('HUGGINGFACE_TOKEN'))
     intents = discord.Intents.default()
     intents.message_content = True
     bot = commands.Bot(command_prefix='/', intents=intents)
