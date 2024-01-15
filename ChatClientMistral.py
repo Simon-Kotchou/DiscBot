@@ -3,11 +3,19 @@ import torch
 from discord.ext import commands
 import concurrent.futures
 from operator import itemgetter
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
 from langchain.llms import HuggingFacePipeline
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
+
+nf4_config = BitsAndBytesConfig(
+   load_in_4bit=True,
+   bnb_4bit_quant_type="nf4",
+   bnb_4bit_use_double_quant=True,
+   bnb_4bit_compute_dtype=torch.bfloat16
+)
 
 class ChatGenerator(commands.Cog):
     def __init__(self, bot):
@@ -15,14 +23,23 @@ class ChatGenerator(commands.Cog):
         self.conversations = {}
 
         # Initialize the model and chain
-        model_name = 'Intel/neural-chat-7b-v3-1'
-        self.hf = HuggingFacePipeline.from_model_id(
-            model_id=model_name,
-            task="text-generation",
-            device_map="auto",
-            verbose=True,
-            pipeline_kwargs={"max_new_tokens": 256, "repetition_penalty": 1.15}, 
-        )
+        #model_name = 'Intel/neural-chat-7b-v3-3'
+        model_name = 'mistralai/Mistral-7B-Instruct-v0.1'
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name)
+        self.pipe = pipeline("text-generation", 
+                             model=self.model,
+                             tokenizer=self.tokenizer
+                             device_map="auto",
+                             offload_folder = "/tmp/discord_offload", 
+                             max_new_tokens=256, 
+                             repetition_penalty=1.15, 
+                             use_flash_attention_2=True, 
+                             quantization_config=nf4_config,
+                             max_memory=f'{int(torch.cuda.mem_get_info()[0]/1024**3)-2}GB')
+        self.hf = HuggingFacePipeline(pipeline=self.pipe)
+
         self.template = """The following is a friendly conversation between a human and an AI. The AI is talkative and provides lots of specific details from its context. If the AI does not know the answer to a question, it truthfully says it does not know.
 
         Current conversation:
