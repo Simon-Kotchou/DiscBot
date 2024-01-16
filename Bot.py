@@ -17,5 +17,5 @@ if __name__ == "__main__":
     async def on_ready():
         await setup_yt_client(bot)
         await setup_chat_client(bot)
-        #await setup_diffusion_client(bot)
+        await setup_diffusion_client(bot)
     bot.run(os.getenv('DISCORD_TOKEN'))
