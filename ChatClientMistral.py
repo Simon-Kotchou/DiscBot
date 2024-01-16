@@ -2,6 +2,7 @@ import discord
 import torch
 from discord.ext import commands
 import concurrent.futures
+import asyncio
 from operator import itemgetter
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
 from langchain_community.llms import HuggingFacePipeline
@@ -35,8 +36,9 @@ class ChatGenerator(commands.Cog):
         self.pipe = pipeline("text-generation", 
                              model=self.model,
                              tokenizer=self.tokenizer,
-                             device_map="auto",
-                             max_new_tokens=256, 
+                             #device_map="auto",
+                             device_map="cuda:0",
+                             max_new_tokens=512, 
                              repetition_penalty=1.15)
         self.hf = HuggingFacePipeline(pipeline=self.pipe)
 
@@ -81,6 +83,15 @@ class ChatGenerator(commands.Cog):
         async with ctx.typing():
             response = await self.generate_response(ctx.author.id, message)
             await ctx.send(response)
+    
+    async def piped_chat(self, ctx, prompt):
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            prepend = "Please generate a short ~30 word, but very detailed description for an image on this topic: "
+            prompt = prepend + prompt
+            result = await loop.run_in_executor(pool, lambda x: self.pipe(x), prompt)
+            result = result[0]['generated_text'].replace(prompt, "")
+        return result
 
 async def setup_chat_client(bot):
     if not bot.get_cog("ChatGenerator"):
