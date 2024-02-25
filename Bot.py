@@ -1,6 +1,6 @@
 import discord
 from YTClient import setup_yt_client
-from DiffusionClientTmp import setup_diffusion_client
+from DiffusionClient import setup_diffusion_client
 from ChatClientMistral import setup_chat_client
 from discord.ext import commands
 import os
