@@ -24,7 +24,6 @@ class ChatGenerator(commands.Cog):
         self.conversations = {}
 
         # Initialize the model and chain
-        #model_name = 'Intel/neural-chat-7b-v3-3'
         model_name = 'mistralai/Mistral-7B-Instruct-v0.2'
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -45,6 +44,7 @@ class ChatGenerator(commands.Cog):
         self.template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context. 
         If the AI does not know the answer to a question, it truthfully says it does not know.
+        And please only add the reply, you are the assistant in this case, the human will continue chatting if needed.
 
         Current conversation:
         {history}
