@@ -71,7 +71,7 @@ class ImageGenerator(commands.Cog):
             width=1024,
             negative_prompt="",
             guidance_scale=4.0,
-            num_inference_steps=20,
+            num_inference_steps=30,
             num_images_per_prompt=1
         )
 
@@ -85,10 +85,10 @@ class ImageGenerator(commands.Cog):
             negative_prompt="",
             guidance_scale=0.0,
             output_type="pil",
-            num_inference_steps=10
+            num_inference_steps=20,
         ).images
 
-        return decoder_output[0]
+        return decoder_output
 
     @commands.command(aliases=["paint"])
     async def generate_image(self, ctx, *, prompt):

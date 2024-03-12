@@ -41,15 +41,16 @@ class ChatGenerator(commands.Cog):
                              repetition_penalty=1.15)
         self.hf = HuggingFacePipeline(pipeline=self.pipe)
 
-        self.template = """The following is a friendly conversation between a human and an AI. 
+        self.template = """
+        The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context. 
         If the AI does not know the answer to a question, it truthfully says it does not know.
         And please only add the reply, you are the assistant in this case, the human will continue chatting if needed.
 
         Current conversation:
         {history}
-        Human: {input}
-        AI Assistant:"""
+        You should answer this question: {input}
+        """
         self.prompt = PromptTemplate(input_variables=["history", "input"], template=self.template)
 
     async def generate_response(self, user_id, question):
@@ -87,7 +88,7 @@ class ChatGenerator(commands.Cog):
     async def piped_chat(self, ctx, prompt):
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            prepend = "Please generate a short ~30 word, but very detailed description for an image on this topic: "
+            prepend = "Please generate a short ~30 word, but detailed description for an image on this topic: "
             prompt = prepend + prompt
             result = await loop.run_in_executor(pool, lambda x: self.pipe(x), prompt)
             result = result[0]['generated_text'].replace(prompt, "")
