@@ -19,8 +19,9 @@ nf4_config = BitsAndBytesConfig(
 )
 
 class ChatGenerator(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot, model_handler):
         self.bot = bot
+        self.model_handler = model_handler
         self.conversations = {}
 
         # Initialize the model and chain
@@ -81,6 +82,9 @@ class ChatGenerator(commands.Cog):
     @commands.command(name="chat")
     async def chat(self, ctx, *, message):
         """Interact with the chat model."""
+        if "chat" not in self.model_handler.loaded_models:
+            await ctx.send("Chat model not loaded. Please load the model using the 'load_model' command.")
+            return
         async with ctx.typing():
             response = await self.generate_response(ctx.author.id, message)
             await ctx.send(response)
@@ -95,7 +99,8 @@ class ChatGenerator(commands.Cog):
         return result
 
 async def setup_chat_client(bot):
-    if not bot.get_cog("ChatGenerator"):
-        await bot.add_cog(ChatGenerator(bot))
+    model_handler = bot.get_cog("ModelHandler")
+    if model_handler and not bot.get_cog("ChatGenerator"):
+        await bot.add_cog(ChatGenerator(bot, model_handler))
     else:
         print("ChatGenerator cog has already been added.")
