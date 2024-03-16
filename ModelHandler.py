@@ -2,7 +2,9 @@ import torch
 from discord.ext import commands
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
 from langchain_community.llms import HuggingFacePipeline
-from diffusers import AutoPipelineForText2Image, StableCascadePriorPipeline, StableCascadeDecoderPipeline
+from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 from dataclasses import dataclass
 from typing import Callable, List
 
@@ -55,37 +57,23 @@ async def load_chat_model(model_handler, ctx, gpu_indices):
     }
     await ctx.send(f"Loaded chat model on GPU {gpu_index}.")
 
-async def load_sdxl_turbo_model(model_handler, ctx, gpu_indices):
+async def load_sdxl_lightning_model(model_handler, ctx, gpu_indices):
     gpu_index = gpu_indices[0]
-    pipeline = AutoPipelineForText2Image.from_pretrained(
-        "stabilityai/sdxl-turbo",
-        torch_dtype=torch.float16,
-        variant="fp16"
-    ).to(f"cuda:{gpu_index}")
-    model_handler.loaded_models["image_fast"] = {
+    base = "stabilityai/stable-diffusion-xl-base-1.0"
+    repo = "ByteDance/SDXL-Lightning"
+    ckpt = "sdxl_lightning_8step_unet.safetensors"
+
+    unet = UNet2DConditionModel.from_config(base, subfolder="unet").to(f"cuda:{gpu_index}", torch.float16)
+    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device=f"cuda:{gpu_index}"))
+
+    pipeline = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16").to(f"cuda:{gpu_index}")
+    pipeline.scheduler = EulerDiscreteScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
+
+    model_handler.loaded_models["image"] = {
         "pipeline": pipeline,
         "gpu_index": gpu_index
     }
-    await ctx.send(f"Loaded diffusion model with fast quality on GPU {gpu_index}.")
-
-async def load_stable_cascade_model(model_handler, ctx, gpu_indices):
-    prior_gpu_index, decoder_gpu_index = gpu_indices
-    pipeline = {
-        "prior": StableCascadePriorPipeline.from_pretrained(
-            "stabilityai/stable-cascade-prior",
-            torch_dtype=torch.bfloat16
-        ).to(f"cuda:{prior_gpu_index}"),
-        "decoder": StableCascadeDecoderPipeline.from_pretrained(
-            "stabilityai/stable-cascade",
-            torch_dtype=torch.float16,
-            revision="refs/pr/17"
-        ).to(f"cuda:{decoder_gpu_index}")
-    }
-    model_handler.loaded_models["image_quality"] = {
-        "pipeline": pipeline,
-        "gpu_indices": gpu_indices
-    }
-    await ctx.send(f"Loaded diffusion model with quality settings on GPUs {gpu_indices}.")
+    await ctx.send(f"Loaded SDXL Lightning model on GPU {gpu_index}.")
 
 class ModelHandler(commands.Cog):
     def __init__(self, bot):
@@ -93,10 +81,10 @@ class ModelHandler(commands.Cog):
         self.loaded_models = {}
         self.model_servers = {}
         self.gpu_info = self.get_gpu_info()
+        self.allocated_gpus = []  # Initialize allocated_gpus as an empty list
         self.available_models = [
-            ModelInfo("chat", "mistralai/Mistral-7B-Instruct-v0.2", 1, load_chat_model, required_memory=8 * 1024 ** 3),
-            ModelInfo("image_fast", "stabilityai/sdxl-turbo", 1, load_sdxl_turbo_model, required_memory=4 * 1024 ** 3),
-            ModelInfo("image_quality", "stabilityai/stable-cascade", 2, load_stable_cascade_model, required_memory=6 * 1024 ** 3)
+            ModelInfo("chat", "mistralai/Mistral-7B-Instruct-v0.2", 1, load_chat_model, required_memory=7064451072),
+            ModelInfo("image", "ByteDance/SDXL-Lightning", 1, load_sdxl_lightning_model, required_memory=7065827840)
         ]
 
     def get_gpu_info(self):
@@ -114,9 +102,10 @@ class ModelHandler(commands.Cog):
     def get_available_gpus(self, required_memory):
         available_gpus = []
         for gpu in self.gpu_info:
-            free_memory = gpu["memory_total"] - gpu["memory_allocated"]
-            if free_memory >= required_memory:
-                available_gpus.append(gpu["index"])
+            if gpu["index"] not in self.allocated_gpus:  # Check if the GPU is not already allocated
+                free_memory = gpu["memory_total"] - gpu["memory_allocated"]
+                if free_memory >= required_memory:
+                    available_gpus.append(gpu["index"])
         return available_gpus
 
     async def load_model(self, ctx, model_type: str):
@@ -134,6 +123,7 @@ class ModelHandler(commands.Cog):
 
         if len(available_gpus) >= model_info.num_gpus:
             gpu_indices = available_gpus[:model_info.num_gpus]
+            self.allocated_gpus.extend(gpu_indices)  # Allocate the selected GPUs
             await model_info.load_function(self, ctx, gpu_indices)
             self.model_servers[model_type] = ctx.guild.id
         else:
@@ -156,6 +146,10 @@ class ModelHandler(commands.Cog):
             del model_info["hf"]
         else:
             del model_info["pipeline"]
+
+        gpu_indices = model_info["gpu_index"] if isinstance(model_info["gpu_index"], list) else [model_info["gpu_index"]]
+        for gpu_index in gpu_indices:
+            self.allocated_gpus.remove(gpu_index)  # Deallocate the GPUs
 
         torch.cuda.empty_cache()
         del self.loaded_models[model_type]

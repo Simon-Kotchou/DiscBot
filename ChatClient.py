@@ -74,7 +74,7 @@ class ChatGenerator(commands.Cog):
         pipe = self.model_handler.loaded_models["chat"]["pipe"]
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as pool:
-            prepend = "Please generate a short ~30 word, but detailed description for an image on this topic: "
+            prepend = "Please generate a short ~20 word, but detailed description for an image on this topic: "
             prompt = prepend + prompt
             result = await loop.run_in_executor(pool, lambda x: pipe(x), prompt)
             result = result[0]['generated_text'].replace(prompt, "")
