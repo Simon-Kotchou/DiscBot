@@ -81,6 +81,7 @@ class ModelHandler(commands.Cog):
         self.loaded_models = {}
         self.model_servers = {}
         self.gpu_info = self.get_gpu_info()
+        self.allocated_gpus = []  # Initialize allocated_gpus as an empty list
         self.available_models = [
             ModelInfo("chat", "mistralai/Mistral-7B-Instruct-v0.2", 1, load_chat_model, required_memory=7064451072),
             ModelInfo("image", "ByteDance/SDXL-Lightning", 1, load_sdxl_lightning_model, required_memory=7065827840)
@@ -101,9 +102,10 @@ class ModelHandler(commands.Cog):
     def get_available_gpus(self, required_memory):
         available_gpus = []
         for gpu in self.gpu_info:
-            free_memory = gpu["memory_total"] - gpu["memory_allocated"]
-            if free_memory >= required_memory:
-                available_gpus.append(gpu["index"])
+            if gpu["index"] not in self.allocated_gpus:  # Check if the GPU is not already allocated
+                free_memory = gpu["memory_total"] - gpu["memory_allocated"]
+                if free_memory >= required_memory:
+                    available_gpus.append(gpu["index"])
         return available_gpus
 
     async def load_model(self, ctx, model_type: str):
@@ -121,6 +123,7 @@ class ModelHandler(commands.Cog):
 
         if len(available_gpus) >= model_info.num_gpus:
             gpu_indices = available_gpus[:model_info.num_gpus]
+            self.allocated_gpus.extend(gpu_indices)  # Allocate the selected GPUs
             await model_info.load_function(self, ctx, gpu_indices)
             self.model_servers[model_type] = ctx.guild.id
         else:
@@ -143,6 +146,10 @@ class ModelHandler(commands.Cog):
             del model_info["hf"]
         else:
             del model_info["pipeline"]
+
+        gpu_indices = model_info["gpu_index"] if isinstance(model_info["gpu_index"], list) else [model_info["gpu_index"]]
+        for gpu_index in gpu_indices:
+            self.allocated_gpus.remove(gpu_index)  # Deallocate the GPUs
 
         torch.cuda.empty_cache()
         del self.loaded_models[model_type]
