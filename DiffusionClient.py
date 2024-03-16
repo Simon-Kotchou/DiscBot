@@ -13,73 +13,32 @@ class ImageGenerator(commands.Cog):
         self.model_handler = model_handler
         self.lock = asyncio.Lock()
 
-    def generate_with_sdxl_turbo(self, ctx, prompt):
-        pipeline = self.model_handler.loaded_models["image_fast"]["pipeline"]
-        image = pipeline(prompt=prompt, num_inference_steps=1, guidance_scale=0.0, num_images_per_prompt=2).images
+    def generate_with_sdxl_lightning(self, ctx, prompt):
+        pipeline = self.model_handler.loaded_models["image"]["pipeline"]
+        image = pipeline(prompt, num_inference_steps=8, guidance_scale=0).images[0]
         return image
-
-    def generate_with_stable_cascade(self, ctx, prompt):
-        pipeline = self.model_handler.loaded_models["image_quality"]["pipeline"]
-
-        # Generate embeddings with the "prior"
-        prior_output = pipeline["prior"](
-            prompt=prompt,
-            height=1024,
-            width=1024,
-            negative_prompt="",
-            guidance_scale=4.0,
-            num_inference_steps=30,
-            num_images_per_prompt=1
-        )
-
-        # Generate the final image with the "decoder"
-        decoder_output = pipeline["decoder"](
-            image_embeddings=prior_output.image_embeddings,
-            prompt=prompt,
-            negative_prompt="",
-            guidance_scale=0.0,
-            output_type="pil",
-            num_inference_steps=20,
-        ).images
-
-        return decoder_output
 
     @commands.command(aliases=["paint"])
     async def generate_image(self, ctx, *, prompt):
-        """Generate an image based on the given prompt."""
-        if "image_fast" not in self.model_handler.loaded_models and "image_quality" not in self.model_handler.loaded_models:
-            await ctx.send("No diffusion model loaded. Please load a model using the 'load' command with 'image_fast' or 'image_quality' as the model type.")
+        if "image" not in self.model_handler.loaded_models:
+            await ctx.send("No diffusion model loaded. Please load a model using the 'load' command with 'image' as the model type.")
             return
 
         async with self.lock:
             async with ctx.typing():
                 loop = asyncio.get_event_loop()
-                if "image_fast" in self.model_handler.loaded_models:
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        images = await loop.run_in_executor(pool, self.generate_with_sdxl_turbo, ctx, prompt)
-                elif "image_quality" in self.model_handler.loaded_models:
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        images = await loop.run_in_executor(pool, self.generate_with_stable_cascade, ctx, prompt)
-                else:
-                    await ctx.send("No diffusion model loaded. Please load a model using the 'load' command with 'image_fast' or 'image_quality' as the model type.")
-                    return
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    image = await loop.run_in_executor(pool, self.generate_with_sdxl_lightning, ctx, prompt)
 
                 torch.cuda.empty_cache()
                 gc.collect()
 
-                # Check if images is not a list, then make it a list
-                if not isinstance(images, list):
-                    images = [images]
-
-                # Now images is guaranteed to be a list, so we can iterate
-                files = []
-                if images:
-                    for image in images:
-                        with io.BytesIO() as binary_img:
-                            image.save(binary_img, 'PNG')
-                            binary_img.seek(0)
-                            files.append(discord.File(binary_img, filename=f'image_{images.index(image)}.png'))
-                    await ctx.send(files=files)
+                if image:
+                    with io.BytesIO() as binary_img:
+                        image.save(binary_img, 'PNG')
+                        binary_img.seek(0)
+                        file = discord.File(binary_img, filename='image.png')
+                    await ctx.send(file=file)
                 else:
                     await ctx.send("Unable to generate an image for the given prompt.")
 
