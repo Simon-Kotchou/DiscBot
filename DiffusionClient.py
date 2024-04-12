@@ -6,6 +6,7 @@ import PIL
 import concurrent.futures
 import asyncio
 import gc
+import os
 
 class ImageGenerator(commands.Cog):
     def __init__(self, bot, model_handler):
@@ -15,7 +16,10 @@ class ImageGenerator(commands.Cog):
 
     def generate_with_sdxl_lightning(self, ctx, prompt):
         pipeline = self.model_handler.loaded_models["image"]["pipeline"]
-        image = pipeline(prompt, num_inference_steps=8, guidance_scale=0).images[0]
+        seed = int.from_bytes(os.urandom(4), "big")
+        print(f"Using seed: {seed}")
+        generator = torch.Generator("cuda").manual_seed(seed)
+        image = pipeline(prompt, num_inference_steps=8, guidance_scale=0, generator=generator).images[0]
         return image
 
     @commands.command(aliases=["paint"])
@@ -30,17 +34,17 @@ class ImageGenerator(commands.Cog):
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     image = await loop.run_in_executor(pool, self.generate_with_sdxl_lightning, ctx, prompt)
 
-                torch.cuda.empty_cache()
-                gc.collect()
-
                 if image:
                     with io.BytesIO() as binary_img:
                         image.save(binary_img, 'PNG')
                         binary_img.seek(0)
                         file = discord.File(binary_img, filename='image.png')
                     await ctx.send(file=file)
+                    del image
                 else:
                     await ctx.send("Unable to generate an image for the given prompt.")
+            torch.cuda.empty_cache()
+            gc.collect()
 
     @commands.command(name="pipe")
     async def pipe(self, ctx, *, prompt):

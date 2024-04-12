@@ -13,11 +13,12 @@ class ChatGenerator(commands.Cog):
         self.bot = bot
         self.model_handler = model_handler
         self.conversations = {}
+        self.lock = asyncio.Lock()
 
         self.template = """
-        The following is a friendly conversation between a human and an AI. 
-        The AI is talkative and provides lots of specific details from its context. 
-        If the AI does not know the answer to a question, it truthfully says it does not know.
+        The following is a friendly conversation between a human and You. 
+        You are talkative and provide lots of specific details from its context. 
+        If you do not know the answer to a question, truthfully says it does not know.
         And please only add the reply, you are the assistant in this case, the human will continue chatting if needed.
 
         Current conversation:
@@ -50,8 +51,9 @@ class ChatGenerator(commands.Cog):
         )
 
         inputs = {"input": question}
-        with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
-            response = await chain.ainvoke(inputs)
+        async with self.lock:
+            with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
+                response = await chain.ainvoke(inputs)
         memory.save_context(inputs, {"output": response})
         self.conversations[user_id] = memory
 
@@ -65,20 +67,20 @@ class ChatGenerator(commands.Cog):
             if response:
                 await ctx.send(response)
 
-
     async def generate_image_description(self, ctx, prompt):
         if "chat" not in self.model_handler.loaded_models:
             await ctx.send("Chat model not loaded. Please load the model using the 'load' command with 'chat' as the model type.")
             return None
 
         pipe = self.model_handler.loaded_models["chat"]["pipe"]
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            prepend = "Please generate a short ~20 word, but detailed description for an image on this topic: "
-            prompt = prepend + prompt
-            result = await loop.run_in_executor(pool, lambda x: pipe(x), prompt)
-            result = result[0]['generated_text'].replace(prompt, "")
-        return result
+        async with self.lock:
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                prepend = "Please generate a short ~20 word, but detailed description for an image on this topic: "
+                prompt = prepend + prompt
+                result = await loop.run_in_executor(pool, lambda x: pipe(x), prompt)
+                result = result[0]['generated_text'].replace(prompt, "")
+            return result
 
 async def setup_chat_client(bot, model_handler):
     if not bot.get_cog("ChatGenerator"):
