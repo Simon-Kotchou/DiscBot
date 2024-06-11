@@ -2,7 +2,7 @@ import torch
 from discord.ext import commands
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
 from langchain_community.llms import HuggingFacePipeline
-from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler
+from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler, AutoencoderTiny
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 from dataclasses import dataclass
@@ -23,23 +23,24 @@ class ModelInfo:
     load_function: Callable
 
 async def load_chat_model(model_handler, ctx):
-    model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    #model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    model_name = "meta-llama/Meta-Llama-3-8B"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         offload_folder="/tmp/discord_offload",
-        quantization_config=nf4_config,
-        #device_map="balanced"
+        quantization_config=nf4_config
     )
     pipe = pipeline(
         "text-generation",
         model=model,
         tokenizer=tokenizer,
-        device_map="balanced",
+        # device_map="auto",
         max_new_tokens=320,
         repetition_penalty=1.15
     )
+    pipe.enable_model_cpu_offload()
     hf = HuggingFacePipeline(pipeline=pipe)
 
     model_handler.loaded_models["chat"] = {
@@ -53,9 +54,10 @@ async def load_chat_model(model_handler, ctx):
 async def load_sdxl_lightning_model(model_handler, ctx):
     base = "stabilityai/stable-diffusion-xl-base-1.0"
     repo = "ByteDance/SDXL-Lightning"
-    ckpt = "sdxl_lightning_8step_unet.safetensors"
+    ckpt = "sdxl_lightning_4step_unet.safetensors"
+    taesd_model = "madebyollin/taesdxl"
 
-    unet = UNet2DConditionModel.from_config(base, subfolder="unet")
+    unet = UNet2DConditionModel.from_config(base, subfolder="unet", torch_dtype=torch.float16)
     unet.load_state_dict(load_file(hf_hub_download(repo, ckpt)))
 
     pipeline = StableDiffusionXLPipeline.from_pretrained(
@@ -63,10 +65,12 @@ async def load_sdxl_lightning_model(model_handler, ctx):
         unet=unet,
         torch_dtype=torch.float16,
         variant="fp16",
-        device_map="balanced"
     )
     pipeline.scheduler = EulerDiscreteScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
-
+    pipeline.vae = AutoencoderTiny.from_pretrained(
+        taesd_model, torch_dtype=torch.float16, use_safetensors=True
+    )
+    pipeline.enable_model_cpu_offload()
     model_handler.loaded_models["image"] = {
         "pipeline": pipeline
     }
