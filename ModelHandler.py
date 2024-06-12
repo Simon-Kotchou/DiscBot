@@ -54,11 +54,11 @@ async def load_chat_model(model_handler, ctx):
 async def load_sdxl_lightning_model(model_handler, ctx):
     base = "stabilityai/stable-diffusion-xl-base-1.0"
     repo = "ByteDance/SDXL-Lightning"
-    ckpt = "sdxl_lightning_4step_unet.safetensors"
+    ckpt = "sdxl_lightning_8step_unet.safetensors"
     taesd_model = "madebyollin/taesdxl"
 
-    unet = UNet2DConditionModel.from_config(base, subfolder="unet", torch_dtype=torch.float16)
-    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt)))
+    unet = UNet2DConditionModel.from_config(base, subfolder="unet").to("cuda", torch.float16)
+    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
 
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         base,
@@ -83,8 +83,8 @@ class ModelHandler(commands.Cog):
         self.model_servers = {}
         self.allocated_gpus = set()
         self.available_models = [
-            ModelInfo("chat", "mistralai/Mistral-7B-Instruct-v0.2", 2, load_chat_model),
-            ModelInfo("image", "ByteDance/SDXL-Lightning", 2, load_sdxl_lightning_model)
+            ModelInfo("chat", "meta-llama/Meta-Llama-3-8B", 1, load_chat_model),
+            ModelInfo("image", "ByteDance/SDXL-Lightning", 1, load_sdxl_lightning_model)
         ]
 
     async def load_model(self, ctx, model_type: str):
