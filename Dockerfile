@@ -33,11 +33,11 @@ RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest
     attrs certifi charset-normalizer discord-py python-dotenv frozenlist idna multidict pynacl requests urllib3 yarl \ 
     async-timeout https://github.com/ytdl-org/ytdl-nightly/archive/2023.08.07.tar.gz \ 
     bitsandbytes git+https://github.com/huggingface/transformers.git \
-    git+https://github.com/kashif/diffusers.git@wuerstchen-v3 \ 
+    git+https://github.com/huggingface/diffusers.git \ 
     git+https://github.com/huggingface/peft.git git+https://github.com/huggingface/accelerate.git langchain==0.1.0 && \
     /opt/conda/bin/conda clean -ya && \
     /opt/conda/bin/conda clean -y --force-pkgs-dirs
-# git+https://github.com/huggingface/diffusers.git
+# git+https://github.com/kashif/diffusers.git@wuerstchen-v3
 ENV PATH /opt/conda/bin:$PATH
 RUN conda config --add channels pytorch
 

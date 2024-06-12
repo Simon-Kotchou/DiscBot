@@ -18,7 +18,7 @@ class ImageGenerator(commands.Cog):
         pipeline = self.model_handler.loaded_models["image"]["pipeline"]
         seed = int.from_bytes(os.urandom(4), "big")
         print(f"Using seed: {seed}")
-        generator = torch.Generator("cuda").manual_seed(seed)
+        generator = torch.manual_seed(seed)
         image = pipeline(prompt, num_inference_steps=8, guidance_scale=0, generator=generator).images[0]
         return image
 
