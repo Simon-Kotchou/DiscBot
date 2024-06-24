@@ -7,6 +7,11 @@ from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 from dataclasses import dataclass
 from typing import Callable, List
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 nf4_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -23,33 +28,34 @@ class ModelInfo:
     load_function: Callable
 
 async def load_chat_model(model_handler, ctx):
-    #model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     model_name = "meta-llama/Meta-Llama-3-8B"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        offload_folder="/tmp/discord_offload",
-        quantization_config=nf4_config
-    )
-    pipe = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        # device_map="auto",
-        max_new_tokens=320,
-        repetition_penalty=1.15
-    )
-    pipe.enable_model_cpu_offload()
-    hf = HuggingFacePipeline(pipeline=pipe)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            offload_folder="/tmp/discord_offload",
+            quantization_config=nf4_config
+        )
+        pipe = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            max_new_tokens=320,
+            repetition_penalty=1.15
+        )
+        pipe.enable_model_cpu_offload()
+        hf = HuggingFacePipeline(pipeline=pipe)
 
-    model_handler.loaded_models["chat"] = {
-        "model": model,
-        "tokenizer": tokenizer,
-        "pipe": pipe,
-        "hf": hf
-    }
-    await ctx.send("Loaded chat model.")
+        model_handler.loaded_models["chat"] = {
+            "model": model,
+            "tokenizer": tokenizer,
+            "pipe": pipe,
+            "hf": hf
+        }
+        await ctx.send("Loaded chat model.")
+    except Exception as e:
+        logger.error(f"Error loading chat model: {e}")
+        await ctx.send(f"Failed to load chat model: {str(e)}")
 
 async def load_sdxl_lightning_model(model_handler, ctx):
     base = "stabilityai/stable-diffusion-xl-base-1.0"
@@ -57,31 +63,36 @@ async def load_sdxl_lightning_model(model_handler, ctx):
     ckpt = "sdxl_lightning_8step_unet.safetensors"
     taesd_model = "madebyollin/taesdxl"
 
-    unet = UNet2DConditionModel.from_config(base, subfolder="unet").to("cuda", torch.float16)
-    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
+    try:
+        unet = UNet2DConditionModel.from_config(base, subfolder="unet").to("cuda", torch.float16)
+        unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
 
-    pipeline = StableDiffusionXLPipeline.from_pretrained(
-        base,
-        unet=unet,
-        torch_dtype=torch.float16,
-        variant="fp16",
-    )
-    pipeline.scheduler = EulerDiscreteScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
-    pipeline.vae = AutoencoderTiny.from_pretrained(
-        taesd_model, torch_dtype=torch.float16, use_safetensors=True
-    )
-    pipeline.enable_model_cpu_offload()
-    model_handler.loaded_models["image"] = {
-        "pipeline": pipeline
-    }
-    await ctx.send("Loaded SDXL Lightning model.")
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            base,
+            unet=unet,
+            torch_dtype=torch.float16,
+            variant="fp16",
+            safety_checker=None,
+        )
+        pipeline.scheduler = EulerDiscreteScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
+        pipeline.vae = AutoencoderTiny.from_pretrained(
+            taesd_model, torch_dtype=torch.float16, use_safetensors=True
+        )
+        pipeline.enable_model_cpu_offload()
+        model_handler.loaded_models["image"] = {
+            "pipeline": pipeline
+        }
+        await ctx.send("Loaded SDXL Lightning model.")
+    except Exception as e:
+        logger.error(f"Error loading SDXL Lightning model: {e}")
+        await ctx.send(f"Failed to load SDXL Lightning model: {str(e)}")
 
 class ModelHandler(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.loaded_models = {}
         self.model_servers = {}
-        self.allocated_gpus = set()
+        self.allocated_gpus = set()  # Initialize allocated_gpus
         self.available_models = [
             ModelInfo("chat", "meta-llama/Meta-Llama-3-8B", 1, load_chat_model),
             ModelInfo("image", "ByteDance/SDXL-Lightning", 1, load_sdxl_lightning_model)
@@ -132,6 +143,9 @@ class ModelHandler(commands.Cog):
         self.allocated_gpus.difference_update(gpu_indices)
 
         torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         del self.loaded_models[model_type]
         del self.model_servers[model_type]
         await ctx.send(f"Unloaded {model_type} model from GPUs: {gpu_indices}")
