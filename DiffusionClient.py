@@ -7,6 +7,10 @@ import concurrent.futures
 import asyncio
 import gc
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ImageGenerator(commands.Cog):
     def __init__(self, bot, model_handler):
@@ -15,12 +19,16 @@ class ImageGenerator(commands.Cog):
         self.lock = asyncio.Lock()
 
     def generate_with_sdxl_lightning(self, ctx, prompt):
-        pipeline = self.model_handler.loaded_models["image"]["pipeline"]
-        seed = int.from_bytes(os.urandom(4), "big")
-        print(f"Using seed: {seed}")
-        generator = torch.manual_seed(seed)
-        image = pipeline(prompt, num_inference_steps=8, guidance_scale=0, generator=generator).images[0]
-        return image
+        try:
+            pipeline = self.model_handler.loaded_models["image"]["pipeline"]
+            seed = int.from_bytes(os.urandom(4), "big")
+            logger.info(f"Using seed: {seed}")
+            generator = torch.manual_seed(seed)
+            image = pipeline(prompt, num_inference_steps=8, guidance_scale=0, generator=generator).images[0]
+            return image
+        except Exception as e:
+            logger.error(f"Error generating image: {e}")
+            return None
 
     @commands.command(aliases=["paint"])
     async def generate_image(self, ctx, *, prompt):
@@ -33,7 +41,7 @@ class ImageGenerator(commands.Cog):
                 loop = asyncio.get_event_loop()
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     image = await loop.run_in_executor(pool, self.generate_with_sdxl_lightning, ctx, prompt)
-
+                
                 if image:
                     with io.BytesIO() as binary_img:
                         image.save(binary_img, 'PNG')
@@ -43,6 +51,7 @@ class ImageGenerator(commands.Cog):
                     del image
                 else:
                     await ctx.send("Unable to generate an image for the given prompt.")
+            
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -61,7 +70,11 @@ class ImageGenerator(commands.Cog):
             await ctx.send("Failed to generate image description.")
 
 async def setup_diffusion_client(bot, model_handler):
-    if not bot.get_cog("ImageGenerator"):
+    try:
+        if bot.get_cog("ImageGenerator"):
+            await bot.remove_cog("ImageGenerator")
         await bot.add_cog(ImageGenerator(bot, model_handler))
-    else:
-        print("ImageGenerator cog has already been added.")
+        logger.info("ImageGenerator cog has been set up successfully.")
+    except Exception as e:
+        logger.error(f"Error setting up ImageGenerator cog: {e}")
+        raise
