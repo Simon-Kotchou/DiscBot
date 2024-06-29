@@ -12,16 +12,20 @@ pynacl==1.5.0
 requests==2.31.0
 urllib3==2.0.4
 yarl==1.9.2
+onnx-coreml
+coremltools
+python-dotenv
+Pillow
 
 #music
 async-timeout==4.0.3
 https://github.com/ytdl-org/ytdl-nightly/archive/2023.08.07.tar.gz
 
 # NN
-torch==2.1.1 --index-url https://download.pytorch.org/whl/cu118
 bitsandbytes
 # Regular PyPI packages
 git+https://github.com/huggingface/transformers.git
+git+https://github.com/huggingface/diffusers.git
 git+https://github.com/huggingface/peft.git
 git+https://github.com/huggingface/accelerate.git
 langchain==0.1.0
