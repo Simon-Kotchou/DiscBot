@@ -26,7 +26,7 @@ class ChatGenerator(commands.Cog):
 
         messages = [
             {"role": "system", "content": "You are a sentient, superintelligent artificial general intelligence, here to teach and assist the user."},
-            *conversation[-10:]  # Use last 10 messages for context
+            *conversation[-5:]  # Use last 5 messages for context
         ]
 
         input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True).to(model.device)
