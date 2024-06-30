@@ -54,6 +54,16 @@ class ChatGenerator(commands.Cog):
             response = await self.generate_response(ctx, ctx.author.id, message)
             if response:
                 await ctx.send(response)
+    
+    @commands.command(name="clear_chat")
+    async def clear_chat(self, ctx):
+        """Clear the conversation history for the user."""
+        user_id = ctx.author.id
+        if user_id in self.conversations:
+            del self.conversations[user_id]
+            await ctx.send("Your chat history has been cleared.")
+        else:
+            await ctx.send("You don't have any chat history to clear.")
 
     async def generate_image_description(self, ctx, prompt):
         if "chat" not in self.model_handler.loaded_models:
