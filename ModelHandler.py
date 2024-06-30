@@ -172,13 +172,12 @@
 
 import torch
 from discord.ext import commands
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
-from langchain_community.llms import HuggingFacePipeline
+from transformers import LlamaForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler, AutoencoderTiny
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -199,33 +198,25 @@ class ModelInfo:
     load_function: Callable
 
 async def load_chat_model(model_handler, ctx):
-    model_name = "cognitivecomputations/dolphin-2.9-llama3-8b"
+    model_name = "NousResearch/Hermes-2-Theta-Llama-3-8B"
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForCausalLM.from_pretrained(
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = LlamaForCausalLM.from_pretrained(
             model_name,
-            offload_folder="/tmp/discord_offload",
-            quantization_config=nf4_config,
+            # offload_folder="/tmp/discord_offload",
+            torch_dtype=torch.bfloat16,
             device_map="auto",
-            torch_dtype=torch.float16
-        )
-
-        pipe = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=320,
-            repetition_penalty=1.15,
-            device_map="auto"
+            quantization_config=nf4_config,
+            attn_implementation="flash_attention_2"
         )
 
         model_handler.loaded_models["chat"] = {
             "model": model,
             "tokenizer": tokenizer,
-            "pipe": pipe,
             "device_map": "auto"
         }
         
+        await ctx.send(f"Loaded chat model: {model_name}")
     except Exception as e:
         logger.error(f"Error loading chat model: {e}")
         await ctx.send(f"Failed to load chat model: {str(e)}")
@@ -271,7 +262,7 @@ class ModelHandler(commands.Cog):
         self.model_servers = {}
         self.allocated_gpus = {}
         self.available_models = [
-            ModelInfo("chat", "cognitivecomputations/dolphin-2.9-llama3-8b", 1, load_chat_model),
+            ModelInfo("chat", "NousResearch/Hermes-2-Theta-Llama-3-8B", 1, load_chat_model),
             ModelInfo("image", "ByteDance/SDXL-Lightning", 1, load_sdxl_lightning_model)
         ]
 

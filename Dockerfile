@@ -36,6 +36,7 @@ RUN pip install --no-cache-dir \
     async-timeout \
     https://github.com/ytdl-org/ytdl-nightly/archive/2023.08.07.tar.gz \
     bitsandbytes \
+    flash-attn \
     git+https://github.com/huggingface/transformers.git \
     git+https://github.com/huggingface/diffusers.git \
     git+https://github.com/huggingface/peft.git \
